@@ -53,11 +53,11 @@
         {
             "type": "latency-and-rate-vs-time",
             "loads": {
-                "start": 5000,
-                "end": 5000,
-                "step": 1000
+                "start": 900,
+                "end": 1050,
+                "step": 75
             },
-            "base_rate": 1000,
+            "base_rate": 500,
             "duration_sec": 15,
             "apis": [
                 "f1"
