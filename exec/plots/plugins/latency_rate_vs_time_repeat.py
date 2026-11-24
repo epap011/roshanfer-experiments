@@ -433,6 +433,39 @@ def _plot_multi_api_latency(api_realtime: Dict[str, RealtimeData], out_path: Pat
     grid.save(out_path)
 
 
+def _plot_cpu_vs_time(artifact_dir: Path, api_realtime: Dict[str, RealtimeData],
+                      out_path: Path, style: PlotStyle) -> bool:
+    csv_path = artifact_dir / "raw" / "cpu_metrics.csv"
+    if not csv_path.exists():
+        return False
+    df = pd.read_csv(csv_path)
+    df = df[(df['container'] != 'sidecar') & ~df['pod'].str.startswith('prometheus') & (df['limit'] > 0)]
+    df = df[df.duplicated(['pod', 'container'], keep='first')]
+    if df.empty:
+        return False
+
+    t0 = min(pd.to_datetime(r.df['timestamp'].iloc[0], utc=True) for r in api_realtime.values())
+    df = df.assign(
+        t=(pd.to_datetime(df['timestamp'], utc=True) - t0).dt.total_seconds(),
+        norm=df['utilization'] / 100.0 / df['limit'],
+    )
+    df = df[(df['t'] >= 0) & (df['t'] <= 15.0)]
+    if df.empty:
+        return False
+
+    grid = SubplotGrid(style, layout="1x1")
+    ax = grid.get_ax(0, 0)
+    for idx, (pod, g) in enumerate(sorted(df.groupby('pod'), key=lambda kv: kv[0])):
+        g = g.sort_values('t')
+        plot_line(ax, g['t'].values, g['norm'].values, label=pod, style=style, color_idx=idx)
+    grid.configure_ax(ax, xlabel='Time (s)', ylabel='CPU util. (norm.)', grid=True,
+                      x_data=df['t'].values, x_type='int', x_step=3)
+    ax.set_ylim(0, max(1.05, float(df['norm'].max()) * 1.05))
+    grid.add_shared_legend(position="top")
+    grid.save(out_path)
+    return True
+
+
 def generate_repeat_plots(ctx: Dict) -> List[Path]:
     """Generate rate and latency plots for a single repeat.
     
@@ -508,7 +541,11 @@ def generate_repeat_plots(ctx: Dict) -> List[Path]:
     else:
         _plot_multi_api_latency(api_realtime, lat_path, style, slos)
     produced.append(lat_path)
-    
+
+    cpu_path = out_dir / f"cpu_vs_time_repeat_{repeat_index:03d}.pdf"
+    if _plot_cpu_vs_time(artifact_dir, api_realtime, cpu_path, style):
+        produced.append(cpu_path)
+
     if os.environ.get('PLOT_DEBUG'):
         print(f"[plot-debug] Generated {len(produced)} plots: {[p.name for p in produced]}")
     
